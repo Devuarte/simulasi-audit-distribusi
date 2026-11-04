@@ -7,7 +7,9 @@ from io import BytesIO
 import streamlit.components.v1 as components
 import xlsxwriter  
 
-
+# ==========================================
+# KONFIGURASI HALAMAN & DIREKTORI
+# ==========================================
 st.set_page_config(page_title="Audit Forklift PT S.R.I.", layout="wide")
 
 st.title("Sistem Audit Forklift PT S.R.I.")
@@ -370,7 +372,13 @@ if os.path.exists(CSV_FILENAME):
     st.markdown("<br>", unsafe_allow_html=True)
     with st.expander("Manajemen Data (Hapus Kesalahan Input)"):
         if not df_tampil.empty:
-            opsi_hapus = df_tampil.index.astype(str) + " | " + df_tampil["Tanggal"] + " - " + df_tampil["Seri Forklift"] + " - Rp " + df_tampil["Total Biaya (Rp)"].astype(str)
+            
+            # PENGUBAHAN: Gunakan fungsi .apply() dan .get() agar AMAN (Robust) jika membaca CSV lawas yang tidak punya kolom terbaru.
+            opsi_hapus = df_tampil.apply(
+                lambda row: f"{row.name} | {row.get('Tanggal', 'N/A')} - {row.get('Seri Forklift', 'N/A')} - Rp {row.get('Total Biaya (Rp)', 0)}", 
+                axis=1
+            )
+            
             baris_dihapus = st.selectbox(
                 "Pilih data yang salah input untuk dihapus:", 
                 df_tampil.index, 
@@ -378,9 +386,14 @@ if os.path.exists(CSV_FILENAME):
             )
             
             if st.button("Hapus Data Terpilih", type="primary"):
-                path_foto = df_tampil.loc[baris_dihapus, "File Peta"]
-                if str(path_foto).endswith('.png') and os.path.exists(path_foto):
-                    os.remove(path_foto) 
+                # PENGUBAHAN: Gunakan .get() untuk mencari lokasi foto dengan aman
+                path_foto = df_tampil.get("File Peta", pd.Series()).get(baris_dihapus)
+                
+                if pd.notna(path_foto) and str(path_foto).endswith('.png') and os.path.exists(str(path_foto)):
+                    try:
+                        os.remove(path_foto) 
+                    except:
+                        pass
                 
                 df_tampil = df_tampil.drop(index=baris_dihapus)
                 df_tampil.to_csv(CSV_FILENAME, index=False)
