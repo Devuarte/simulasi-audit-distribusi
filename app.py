@@ -2,89 +2,194 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import os
+import math
 
-st.set_page_config(page_title="Audit Forklift Realtime", layout="centered")
+st.set_page_config(page_title="Audit Forklift Live GPS", layout="centered")
 
-st.title("🚜 Sistem Audit K3 Forklift")
-st.markdown("Aplikasi pencatatan waktu dan kecepatan otomatis untuk evaluasi K3.")
-
-# ==========================================
-# DATABASE RUTE PABRIK
-# ==========================================
-db_rute = {
-    "Gedung A -> Gedung B": {"jarak_m": 120.0, "area": "Outdoor"},
-    "Gedung B -> Gedung C": {"jarak_m": 85.5, "area": "Outdoor"},
-    "Area Mixing A -> Area Mixing F": {"jarak_m": 45.0, "area": "Indoor"},
-    "Plant 3 (Indoor) -> Plant 3 (Outdoor)": {"jarak_m": 35.0, "area": "Indoor"},
-    "Plant 3 (Outdoor) -> Plant 4 (Outdoor)": {"jarak_m": 145.0, "area": "Outdoor"}
-    # Anda dapat menambahkan rute lainnya di sini
-}
+st.title("🚜 Sistem Audit K3 Forklift (Live GPS)")
+st.markdown("Aplikasi pelacakan rute distribusi real-time menggunakan koordinat GPS.")
 
 CSV_FILENAME = "Audit_Kecepatan_Cloud.csv"
 
 # ==========================================
-# FORMULIR INPUT TRACKER
+# KOMPONEN PETA LIVE GPS & TRACKING (HTML/JS)
 # ==========================================
-with st.form("form_tracker"):
-    col1, col2 = st.columns(2)
-    with col1:
-        seri = st.selectbox("Seri Forklift", [f"Seri {i}" for i in range(1158, 1165)])
-        beban = st.selectbox("Status Beban", ["Kosong (Tanpa Palet)", "Isi (Bawa Barang)"])
-    with col2:
-        rute = st.selectbox("Rute Pergerakan", list(db_rute.keys()))
-        jarak_info = db_rute[rute]['jarak_m']
-        st.info(f"Jarak Rute: {jarak_info} meter ({db_rute[rute]['area']})")
+leaflet_component = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        #map { height: 350px; width: 100%; border-radius: 8px; margin-bottom: 10px; }
+        .button-container { display: flex; gap: 10px; margin-bottom: 10px; }
+        button { flex: 1; padding: 12px; font-size: 15px; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; color: white; }
+        #btn-start { background-color: #16a34a; }
+        #btn-stop { background-color: #dc2626; }
+        button:disabled { background-color: #cbd5e1; cursor: not-allowed; }
+        #info-panel { font-family: sans-serif; font-size: 14px; background: #f8fafc; padding: 10px; border-radius: 6px; border: 1px solid #e2e8f0; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="button-container">
+        <button id="btn-start" onclick="mulaiTracking()">▶ MULAI PERJALANAN</button>
+        <button id="btn-stop" onclick="selesaiTracking()" disabled>⏹ SAMPAI TUJUAN</button>
+    </div>
+    <div id="info-panel">
+        <div><b>Status:</b> <span id="status-text" style="color: gray;">Standby</span></div>
+        <div><b>Jarak Tempuh GPS:</b> <span id="jarak-text">0.00</span> meter</div>
+        <div><b>Waktu Aktif:</b> <span id="waktu-text">0</span> detik</div>
+    </div>
 
-    st.markdown("---")
-    waktu_aktif = st.number_input("Waktu Tempuh Kendaraan (Detik)", min_value=1.0, value=10.0, step=1.0)
-    delay = st.number_input("Waktu Terhalang / Antre (Detik) - Opsional", min_value=0.0, value=0.0, step=1.0)
+    <script>
+        let map, marker, polyline;
+        let watchId = null;
+        let latLngs = [];
+        let totalJarak = 0;
+        let startTime = null;
+        let timerInterval = null;
+        let activeSeconds = 0;
 
-    submit = st.form_submit_button("Simpan & Hitung Kecepatan", type="primary")
+        // Inisialisasi Peta
+        function initMap(lat = -6.480, lon = 106.840) {
+            map = L.map('map').setView([lat, lon], 17);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '© OpenStreetMap'
+            }).addTo(map);
+
+            polyline = L.polyline([], {color: 'blue', weight: 4}).addTo(map);
+        }
+
+        // Hitung jarak Haversine antar 2 titik koordinat GPS (dalam meter)
+        function hitungJarakMeter(lat1, lon1, lat2, lon2) {
+            let R = 6371e3; // Radius bumi dalam meter
+            let dLat = (lat2 - lat1) * Math.PI / 180;
+            let dLon = (lon2 - lon1) * Math.PI / 180;
+            let a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                    Math.sin(dLon/2) * Math.sin(dLon/2);
+            let c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+
+        function mulaiTracking() {
+            if (!navigator.geolocation) {
+                alert("GPS tidak didukung oleh browser Anda.");
+                return;
+            }
+
+            latLngs = [];
+            totalJarak = 0;
+            activeSeconds = 0;
+            document.getElementById("btn-start").disabled = true;
+            document.getElementById("btn-stop").disabled = false;
+            document.getElementById("status-text").innerText = "Berjalan (Melacak GPS...)";
+            document.getElementById("status-text").style.color = "green";
+
+            startTime = Date.now();
+            timerInterval = setInterval(() => {
+                activeSeconds = Math.floor((Date.now() - startTime) / 1000);
+                document.getElementById("waktu-text").innerText = activeSeconds;
+            }, 1000);
+
+            watchId = navigator.geolocation.watchPosition(
+                (position) => {
+                    let lat = position.coords.latitude;
+                    let lon = position.coords.longitude;
+                    let newPoint = [lat, lon];
+
+                    if (latLngs.length > 0) {
+                        let lastPoint = latLngs[latLngs.length - 1];
+                        let dist = hitungJarakMeter(lastPoint[0], lastPoint[1], lat, lon);
+                        // Hanya catat jika perpindahan > 1 meter untuk menghindarinoise GPS
+                        if (dist > 1.0) {
+                            totalJarak += dist;
+                            latLngs.push(newPoint);
+                            polyline.setLatLngs(latLngs);
+                        }
+                    } else {
+                        latLngs.push(newPoint);
+                    }
+
+                    if (!marker) {
+                        marker = L.marker(newPoint).addTo(map);
+                    } else {
+                        marker.setLatLng(newPoint);
+                    }
+                    map.setView(newPoint, map.getZoom());
+
+                    document.getElementById("jarak-text").innerText = totalJarak.toFixed(2);
+                },
+                (error) => {
+                    alert("Gagal mendeteksi GPS: " + error.message);
+                },
+                { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
+            );
+        }
+
+        function selesaiTracking() {
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+            }
+            clearInterval(timerInterval);
+
+            document.getElementById("btn-start").disabled = false;
+            document.getElementById("btn-stop").disabled = true;
+            document.getElementById("status-text").innerText = "Selesai";
+            document.getElementById("status-text").style.color = "blue";
+
+            // Kirim data otomatis ke Streamlit menggunakan window.parent postMessage
+            const dataHasil = {
+                jarak_m: totalJarak > 0 ? totalJarak : 1.0,
+                waktu_aktif: activeSeconds > 0 ? activeSeconds : 1
+            };
+            
+            // Simpan ke localStorage agar bisa dibaca Streamlit python component
+            window.parent.postMessage({type: 'streamlit:setComponentValue', value: dataHasil}, '*');
+        }
+
+        // Panggil inisialisasi peta awal
+        window.onload = function() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => initMap(pos.coords.latitude, pos.coords.longitude),
+                    () => initMap(-6.480, 106.840)
+                );
+            } else {
+                initMap(-6.480, 106.840);
+            }
+        };
+    </script>
+</body>
+</html>
+"""
 
 # ==========================================
-# LOGIKA PEMROSESAN & PENYIMPANAN
+# FORMULIR & TAMPILAN UTAMA STREAMLIT
 # ==========================================
-if submit:
-    jarak_m = db_rute[rute]['jarak_m']
-    area = db_rute[rute]['area']
-    
-    # Hitung kecepatan Aktual
-    kecepatan_kmh = round((jarak_m / waktu_aktif) * 3.6, 2)
-    
-    # Audit K3 Kecepatan
-    batas = 5.0 if area == "Indoor" else 10.0
-    if kecepatan_kmh > batas:
-        status_audit = f"⚠️ OVERSPEED ({batas} km/h)"
-        st.error(f"PELANGGARAN K3! Kecepatan tercatat: {kecepatan_kmh} km/jam.")
-    else:
-        status_audit = "✅ Aman"
-        st.success(f"Aman. Kecepatan tercatat: {kecepatan_kmh} km/jam.")
+col1, col2 = st.columns(2)
+with col1:
+    seri = st.selectbox("Seri Forklift", [f"Seri {i}" for i in range(1158, 1165)])
+    beban = st.selectbox("Status Beban", ["Kosong (Tanpa Palet)", "Isi (Bawa Barang)"])
+with col2:
+    area = st.selectbox("Area Operasional", ["Indoor", "Outdoor"])
 
-    # Simpan ke CSV
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    baris_baru = pd.DataFrame([{
-        "Waktu": timestamp, "Seri": seri, "Rute": rute, "Area": area, 
-        "Jarak (m)": jarak_m, "Beban": beban, "Waktu Aktif (s)": waktu_aktif, 
-        "Delay (s)": delay, "Kecepatan (km/h)": kecepatan_kmh, "Audit": status_audit
-    }])
+st.markdown("### 📍 Peta Pelacakan Rute Real-Time")
 
-    if os.path.exists(CSV_FILENAME):
-        df_lama = pd.read_csv(CSV_FILENAME)
-        df_baru = pd.concat([baris_baru, df_lama], ignore_index=True)
-    else:
-        df_baru = baris_baru
+# Render Komponen Peta Live GPS
+import streamlit.components.v1 as components
+result_data = components.html(leaflet_component, height=480)
 
-    df_baru.to_csv(CSV_FILENAME, index=False)
-
-# ==========================================
-# MENAMPILKAN DATA & TOMBOL UNDUH
-# ==========================================
+st.markdown("---")
 st.markdown("### 📊 Log Hasil Audit")
 if os.path.exists(CSV_FILENAME):
     df_tampil = pd.read_csv(CSV_FILENAME)
     st.dataframe(df_tampil, use_container_width=True)
     
-    # Konversi ke CSV untuk tombol unduh
     csv_data = df_tampil.to_csv(index=False).encode('utf-8')
     st.download_button(
         label="⬇️ Unduh File Excel (CSV)",
@@ -93,4 +198,4 @@ if os.path.exists(CSV_FILENAME):
         mime="text/csv",
     )
 else:
-    st.info("Belum ada data yang tersimpan hari ini.")
+    st.info("Belum ada data perjalanan yang tersimpan.")
