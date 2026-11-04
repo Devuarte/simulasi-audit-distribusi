@@ -8,9 +8,9 @@ import streamlit.components.v1 as components
 # ==========================================
 # KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="Audit Forklift PT S.R.I.", layout="wide", page_icon="🚜")
+st.set_page_config(page_title="Audit Forklift PT S.R.I.", layout="wide")
 
-st.title("🚜 Sistem Audit Forklift PT S.R.I.")
+st.title("Sistem Audit Forklift PT S.R.I.")
 st.markdown("Aplikasi pelacakan rute distribusi real-time, evaluasi hambatan, dan efisiensi biaya operasional.")
 
 CSV_FILENAME = "Audit_Kecepatan_Cloud.csv"
@@ -44,8 +44,8 @@ leaflet_component = """
 <body>
     <div id="map"></div>
     <div class="button-container">
-        <button id="btn-start" onclick="mulaiTracking()">▶ MULAI PERJALANAN</button>
-        <button id="btn-stop" onclick="selesaiTracking()" disabled>⏹ SAMPAI TUJUAN</button>
+        <button id="btn-start" onclick="mulaiTracking()">MULAI PERJALANAN</button>
+        <button id="btn-stop" onclick="selesaiTracking()" disabled>SAMPAI TUJUAN</button>
     </div>
     <div id="info-panel">
         <div class="info-box"><b>Status</b> <span id="status-text" style="color: #64748b;">Standby</span></div>
@@ -140,123 +140,4 @@ leaflet_component = """
             document.getElementById("status-text").style.color = "#2563eb";
 
             const dataHasil = {
-                jarak_m: totalJarak > 0 ? totalJarak : 1.0,
-                waktu_aktif: activeSeconds > 0 ? activeSeconds : 1
-            };
-            window.parent.postMessage({type: 'streamlit:setComponentValue', value: dataHasil}, '*');
-        }
-
-        window.onload = function() {
-            if (navigator.geolocation) {
-                navigator.geolocation.getCurrentPosition(
-                    (pos) => initMap(pos.coords.latitude, pos.coords.longitude),
-                    () => initMap(-6.480, 106.840)
-                );
-            } else {
-                initMap(-6.480, 106.840);
-            }
-        };
-    </script>
-</body>
-</html>
-"""
-
-# ==========================================
-# FORMULIR & TAMPILAN UTAMA STREAMLIT
-# ==========================================
-st.markdown("### 📋 Parameter Audit & Operasional")
-with st.container():
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("**Spesifikasi Kendaraan**")
-        seri = st.selectbox("Seri Forklift", [f"Seri {i}" for i in range(1158, 1165)])
-        beban = st.selectbox("Status Beban", ["Kosong (Tanpa Palet)", "Isi (Bawa Barang)"])
-        area = st.selectbox("Area Operasional", ["Indoor", "Outdoor"])
-        
-    with col2:
-        st.markdown("**Biaya & Konsumsi BBM**")
-        konsumsi_bbm = st.number_input("Penggunaan Bensin (Liter/Km)", min_value=0.0, value=1.5, step=0.1)
-        harga_bbm = st.number_input("Harga BBM per Liter (Rp)", min_value=0, value=10000, step=500)
-        
-    with col3:
-        st.markdown("**Kendala Lapangan**")
-        hambatan = st.text_area("Hambatan di Rute (Opsional)", placeholder="Misal: Jalan berlubang, area loading ramai...")
-        allowance_waktu = st.number_input("Allowance Waktu (Menit)", min_value=0, value=0, help="Tambahan waktu kelonggaran akibat hambatan")
-
-st.markdown("---")
-st.markdown("### 📍 Peta Pelacakan Rute Real-Time")
-# Render Komponen Peta Live GPS
-result_data = components.html(leaflet_component, height=550)
-
-# ==========================================
-# SIMPAN DATA & KALKULASI EFISIENSI (FORM MANUAL INPUT)
-# ==========================================
-st.markdown("### 💾 Kalkulasi & Simpan Hasil Audit")
-st.info("Salin angka Jarak dan Waktu dari layar peta di atas setelah menekan tombol 'SAMPAI TUJUAN', lalu klik Simpan Data.")
-
-with st.form("form_simpan"):
-    f_col1, f_col2, f_col3 = st.columns(3)
-    with f_col1:
-        input_jarak = st.number_input("Jarak Tempuh Tercatat (Meter)", min_value=0.0, value=0.0, step=1.0)
-    with f_col2:
-        input_waktu = st.number_input("Waktu Tempuh Tercatat (Detik)", min_value=0, value=0, step=1)
-    with f_col3:
-        st.markdown("<br>", unsafe_allow_html=True)
-        btn_simpan = st.form_submit_button("✅ Kalkulasi & Simpan Data", use_container_width=True)
-
-if btn_simpan:
-    if input_jarak > 0:
-        # Kalkulasi
-        jarak_km = input_jarak / 1000
-        total_liter = jarak_km * konsumsi_bbm
-        total_biaya = total_liter * harga_bbm
-        efisiensi_per_m = total_biaya / input_jarak if input_jarak > 0 else 0
-        
-        # Tampilkan Metrik Biaya dengan tampilan bagus
-        st.success("Data berhasil dihitung dan disimpan!")
-        m1, m2, m3 = st.columns(3)
-        m1.metric(label="Total Bensin Digunakan", value=f"{total_liter:.2f} Liter")
-        m2.metric(label="Total Biaya Operasional", value=f"Rp {total_biaya:,.0f}")
-        m3.metric(label="Efisiensi Rupiah / Meter", value=f"Rp {efisiensi_per_m:,.2f}")
-        
-        # Simpan ke DataFrame/CSV
-        data_baru = pd.DataFrame([{
-            "Tanggal": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "Seri Forklift": seri,
-            "Beban": beban,
-            "Area": area,
-            "Jarak (Meter)": input_jarak,
-            "Waktu (Detik)": input_waktu,
-            "Hambatan": hambatan if hambatan else "Tidak Ada",
-            "Allowance (Menit)": allowance_waktu,
-            "Liter/Km": konsumsi_bbm,
-            "Total Biaya (Rp)": total_biaya
-        }])
-        
-        if os.path.exists(CSV_FILENAME):
-            df_existing = pd.read_csv(CSV_FILENAME)
-            df_updated = pd.concat([df_existing, data_baru], ignore_index=True)
-        else:
-            df_updated = data_baru
-            
-        df_updated.to_csv(CSV_FILENAME, index=False)
-    else:
-        st.error("Jarak tempuh masih 0. Pastikan Anda sudah menjalankan tracking dan menyalin datanya.")
-
-st.markdown("---")
-st.markdown("### 📊 Log Laporan Audit PT S.R.I.")
-if os.path.exists(CSV_FILENAME):
-    df_tampil = pd.read_csv(CSV_FILENAME)
-    st.dataframe(df_tampil, use_container_width=True)
-    
-    csv_data = df_tampil.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="⬇️ Unduh File Laporan (CSV)",
-        data=csv_data,
-        file_name="Laporan_Audit_Forklift_PT_SRI.csv",
-        mime="text/csv",
-        use_container_width=True
-    )
-else:
-    st.info("Belum ada data perjalanan yang tersimpan di server.")
+                jarak_m: totalJarak > 0 ? total
