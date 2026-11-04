@@ -198,7 +198,6 @@ st.markdown("---")
 # BAGIAN 2: PETA PELACAKAN RUTE
 # ==========================================
 st.markdown("### 2. Peta Pelacakan Rute Real-Time")
-# Komponen diperlebar secara vertikal agar muat responsif di layar HP
 result_data = components.html(leaflet_component, height=600)
 
 st.markdown("---")
@@ -240,7 +239,7 @@ if btn_simpan:
         m2.metric(label="Total Biaya Operasional", value=f"Rp {total_biaya:,.0f}")
         m3.metric(label="Efisiensi Rupiah / Meter", value=f"Rp {efisiensi_per_m:,.2f}")
         
-        # Simpan ke DataFrame/CSV dengan kolom Watermark untuk cegah pencurian data
+        # Simpan ke DataFrame/CSV
         data_baru = pd.DataFrame([{
             "Tanggal": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "Seri Forklift": seri,
@@ -252,7 +251,7 @@ if btn_simpan:
             "Allowance (Menit)": allowance_waktu,
             "Liter/Km": konsumsi_bbm,
             "Total Biaya (Rp)": total_biaya,
-            "Otorisasi Sistem": "© Mikha Febrian" # Watermark Data
+            "Otorisasi Sistem": "© Mikha Febrian"
         }])
         
         if os.path.exists(CSV_FILENAME):
@@ -268,21 +267,44 @@ if btn_simpan:
 st.markdown("---")
 
 # ==========================================
-# BAGIAN 4: LOG LAPORAN
+# BAGIAN 4: LOG LAPORAN & MANAJEMEN DATA
 # ==========================================
 st.markdown("### 4. Log Laporan Audit PT S.R.I.")
 if os.path.exists(CSV_FILENAME):
     df_tampil = pd.read_csv(CSV_FILENAME)
     st.dataframe(df_tampil, use_container_width=True)
     
-    csv_data = df_tampil.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="Unduh File Laporan (CSV)",
-        data=csv_data,
-        file_name="Laporan_Audit_Forklift_PT_SRI.csv",
-        mime="text/csv",
-        use_container_width=True
-    )
+    col_dl, col_blank = st.columns([1, 2])
+    with col_dl:
+        csv_data = df_tampil.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="Unduh File Laporan (CSV)",
+            data=csv_data,
+            file_name="Laporan_Audit_Forklift_PT_SRI.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    
+    # Fitur Hapus Data (Jika ada kesalahan input)
+    st.markdown("<br>", unsafe_allow_html=True)
+    with st.expander("Manajemen Data (Hapus Kesalahan Input)"):
+        if not df_tampil.empty:
+            # Membuat format label agar mudah dibaca operator saat mau menghapus
+            opsi_hapus = df_tampil.index.astype(str) + " | " + df_tampil["Tanggal"] + " - " + df_tampil["Seri Forklift"] + " - Rp " + df_tampil["Total Biaya (Rp)"].astype(str)
+            
+            baris_dihapus = st.selectbox(
+                "Pilih data yang salah input untuk dihapus:", 
+                df_tampil.index, 
+                format_func=lambda x: opsi_hapus[x]
+            )
+            
+            if st.button("Hapus Data Terpilih", type="primary"):
+                df_tampil = df_tampil.drop(index=baris_dihapus)
+                df_tampil.to_csv(CSV_FILENAME, index=False)
+                st.success("Data berhasil dihapus dari sistem!")
+                st.rerun() # Refresh halaman secara otomatis
+        else:
+            st.info("Data masih kosong.")
 else:
     st.info("Belum ada data perjalanan yang tersimpan di server.")
 
