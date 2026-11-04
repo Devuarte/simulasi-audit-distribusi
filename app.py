@@ -5,10 +5,9 @@ import os
 import base64
 from io import BytesIO
 import streamlit.components.v1 as components
+import xlsxwriter  
 
-# ==========================================
-# KONFIGURASI HALAMAN & DIREKTORI
-# ==========================================
+
 st.set_page_config(page_title="Audit Forklift PT S.R.I.", layout="wide")
 
 st.title("Sistem Audit Forklift PT S.R.I.")
@@ -78,7 +77,6 @@ leaflet_component = """
 
         function initMap(lat = -6.480, lon = 106.840) {
             map = L.map('map', {preferCanvas: true}).setView([lat, lon], 17);
-            // Tambahkan crossOrigin agar bisa di-screenshot otomatis
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 maxZoom: 19,
                 attribution: '© OpenStreetMap | <b>Hak Cipta © Mikha Febrian</b>',
@@ -120,7 +118,6 @@ leaflet_component = """
 
             watchId = navigator.geolocation.watchPosition(
                 (position) => {
-                    // Peningkatan Akurasi: Abaikan titik yang akurasinya meleset > 20 meter
                     if(position.coords.accuracy > 20) return; 
 
                     let lat = position.coords.latitude;
@@ -130,7 +127,6 @@ leaflet_component = """
                     if (latLngs.length > 0) {
                         let lastPoint = latLngs[latLngs.length - 1];
                         let dist = hitungJarakMeter(lastPoint[0], lastPoint[1], lat, lon);
-                        // Peningkatan Akurasi: Minimal gerak 2 meter untuk menghilangkan efek sinyal bergetar di tempat
                         if (dist > 2.0) {
                             totalJarak += dist;
                             latLngs.push(newPoint);
@@ -138,13 +134,13 @@ leaflet_component = """
                         }
                     } else {
                         latLngs.push(newPoint);
-                        startMarker = L.marker(newPoint, {icon: startIcon}).addTo(map); // Mark Titik Awal
+                        startMarker = L.marker(newPoint, {icon: startIcon}).addTo(map);
                     }
 
                     if (!currentMarker) {
                         currentMarker = L.marker(newPoint, {icon: truckIcon}).addTo(map);
                     } else {
-                        currentMarker.setLatLng(newPoint); // Update Mark Forklift berjalan
+                        currentMarker.setLatLng(newPoint); 
                     }
                     map.setView(newPoint, map.getZoom());
                     document.getElementById("jarak-text").innerText = totalJarak.toFixed(2) + " m";
@@ -154,7 +150,6 @@ leaflet_component = """
             );
         }
 
-        // FUNGSI INJEKSI DATA OTOMATIS KE PYTHON MENGGUNAKAN DOM HACK
         function setStreamlitInput(labelFragment, value) {
             let parentDoc = window.parent.document;
             let inputs = parentDoc.querySelectorAll('input');
@@ -178,12 +173,10 @@ leaflet_component = """
             document.getElementById("status-text").innerText = "Menyimpan Data...";
             document.getElementById("status-text").style.color = "#eab308";
 
-            // Fitur Foto Rute Otomatis
             setTimeout(() => {
                 html2canvas(document.querySelector("#map-container"), {useCORS: true}).then(canvas => {
                     let imgData = canvas.toDataURL("image/png");
                     
-                    // Kirim data jarak, waktu, dan Foto Map ke form Python secara Otomatis
                     setStreamlitInput("Jarak Tempuh Tercatat", totalJarak.toFixed(2));
                     setStreamlitInput("Waktu Tempuh Tercatat", activeSeconds.toString());
                     setStreamlitInput("Base64 Peta Rahasia", imgData);
@@ -195,7 +188,7 @@ leaflet_component = """
                     setStreamlitInput("Waktu Tempuh Tercatat", activeSeconds.toString());
                     document.getElementById("status-text").innerText = "Selesai (Map Gagal)";
                 });
-            }, 1000); // Jeda sejenak agar peta ter-render utuh
+            }, 1000); 
         }
 
         window.onload = function() {
@@ -252,7 +245,6 @@ with st.form("form_simpan"):
     
     with f_col1:
         st.markdown("**Data dari GPS (Terisi Otomatis)**")
-        # Mengubah menjadi text_input agar JS mudah melakukan injeksi dari DOM Document
         input_jarak_str = st.text_input("Jarak Tempuh Tercatat (Meter)", value="0.0")
         input_waktu_str = st.text_input("Waktu Tempuh Tercatat (Detik)", value="0")
         
@@ -314,7 +306,7 @@ if btn_simpan:
             "Liter/Km": konsumsi_bbm,
             "Total Biaya (Rp)": total_biaya,
             "Otorisasi Sistem": "© Mikha Febrian",
-            "File Peta": map_filepath # Path foto disimpan di database
+            "File Peta": map_filepath 
         }])
         
         if os.path.exists(CSV_FILENAME):
@@ -340,29 +332,24 @@ if os.path.exists(CSV_FILENAME):
     # Fungsi Generate File Excel (.xlsx) dengan Foto Peta tertempel otomatis
     def generate_excel_with_images(df):
         output = BytesIO()
-        # Menggunakan xlsxwriter untuk menanam foto
         workbook = xlsxwriter.Workbook(output, {'in_memory': True})
         worksheet = workbook.add_worksheet("Laporan Audit")
         
-        # Style
         bold_format = workbook.add_format({'bold': True, 'bg_color': '#f3f4f6', 'border': 1})
         border_format = workbook.add_format({'border': 1, 'valign': 'vcenter'})
         
-        # Tulis Header
         headers = df.columns
         for col_num, data in enumerate(headers):
             worksheet.write(0, col_num, data, bold_format)
             worksheet.set_column(col_num, col_num, 15)
         
-        # Tulis Data & Tempel Gambar
         for row_num, row_data in df.iterrows():
             for col_num, cell_data in enumerate(row_data):
                 if headers[col_num] == "File Peta" and str(cell_data).endswith('.png'):
                     worksheet.write(row_num + 1, col_num, "Terlampir", border_format)
                     if os.path.exists(cell_data):
-                        # Tempelkan foto otomatis ke dalam excel dengan skala pas
                         worksheet.insert_image(row_num + 1, col_num, cell_data, {'x_scale': 0.15, 'y_scale': 0.15, 'x_offset': 5, 'y_offset': 5})
-                        worksheet.set_row(row_num + 1, 60) # Perlebar baris excel untuk gambar
+                        worksheet.set_row(row_num + 1, 60) 
                 else:
                     worksheet.write(row_num + 1, col_num, cell_data, border_format)
                     
@@ -380,7 +367,6 @@ if os.path.exists(CSV_FILENAME):
             use_container_width=True
         )
     
-    # Fitur Hapus Data (Jika ada kesalahan input)
     st.markdown("<br>", unsafe_allow_html=True)
     with st.expander("Manajemen Data (Hapus Kesalahan Input)"):
         if not df_tampil.empty:
@@ -394,7 +380,7 @@ if os.path.exists(CSV_FILENAME):
             if st.button("Hapus Data Terpilih", type="primary"):
                 path_foto = df_tampil.loc[baris_dihapus, "File Peta"]
                 if str(path_foto).endswith('.png') and os.path.exists(path_foto):
-                    os.remove(path_foto) # Hapus juga file fotonya agar tidak menumpuk
+                    os.remove(path_foto) 
                 
                 df_tampil = df_tampil.drop(index=baris_dihapus)
                 df_tampil.to_csv(CSV_FILENAME, index=False)
