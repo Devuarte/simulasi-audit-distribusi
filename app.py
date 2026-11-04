@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import os
-import math
 import streamlit.components.v1 as components
 
 # ==========================================
@@ -17,40 +16,54 @@ CSV_FILENAME = "Audit_Kecepatan_Cloud.csv"
 
 # ==========================================
 # KOMPONEN PETA LIVE GPS & TRACKING (HTML/JS)
+# Teroptimasi untuk Layar HP (Mobile-Responsive)
 # ==========================================
 leaflet_component = """
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         body { margin: 0; padding: 0; font-family: sans-serif; }
-        #map { height: 400px; width: 100%; border-radius: 8px; margin-bottom: 15px; border: 2px solid #e2e8f0; }
-        .button-container { display: flex; gap: 10px; margin-bottom: 15px; }
-        button { flex: 1; padding: 14px; font-size: 15px; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; color: white; transition: 0.3s; }
+        /* Responsif tinggi peta untuk HP dan Laptop */
+        #map { height: 50vh; min-height: 320px; width: 100%; border-radius: 8px; margin-bottom: 15px; border: 2px solid #e2e8f0; }
+        
+        /* Flex-wrap agar tombol turun ke bawah di layar sempit */
+        .button-container { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
+        button { flex: 1; min-width: 140px; padding: 14px; font-size: 15px; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; color: white; transition: 0.3s; }
+        
         #btn-start { background-color: #16a34a; }
         #btn-start:hover { background-color: #15803d; }
         #btn-stop { background-color: #dc2626; }
         #btn-stop:hover { background-color: #b91c1c; }
         button:disabled { background-color: #cbd5e1; cursor: not-allowed; }
-        #info-panel { display: flex; justify-content: space-between; background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-        .info-box { text-align: center; }
-        .info-box span { display: block; font-size: 20px; font-weight: bold; color: #0f172a; margin-top: 5px; }
+        
+        /* Responsif info panel */
+        #info-panel { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .info-box { flex: 1; min-width: 30%; text-align: center; }
+        .info-box span { display: block; font-size: 18px; font-weight: bold; color: #0f172a; margin-top: 5px; }
+        
+        /* Watermark Overlay di Peta */
+        .watermark-overlay { position: absolute; top: 10px; right: 10px; z-index: 1000; background: rgba(255, 255, 255, 0.85); padding: 5px 10px; border-radius: 5px; font-size: 11px; font-weight: bold; border: 1px solid #ccc; color: #333; pointer-events: none; }
     </style>
 </head>
 <body>
-    <div id="map"></div>
+    <div style="position: relative;">
+        <div id="map"></div>
+        <div class="watermark-overlay">© System by Mikha Febrian</div>
+    </div>
+    
     <div class="button-container">
         <button id="btn-start" onclick="mulaiTracking()">MULAI PERJALANAN</button>
         <button id="btn-stop" onclick="selesaiTracking()" disabled>SAMPAI TUJUAN</button>
     </div>
     <div id="info-panel">
-        <div class="info-box"><b>Status</b> <span id="status-text" style="color: #64748b;">Standby</span></div>
-        <div class="info-box"><b>Jarak Tempuh</b> <span id="jarak-text">0.00 m</span></div>
-        <div class="info-box"><b>Waktu Aktif</b> <span id="waktu-text">0 s</span></div>
+        <div class="info-box"><b style="font-size: 12px;">Status</b> <span id="status-text" style="color: #64748b;">Standby</span></div>
+        <div class="info-box"><b style="font-size: 12px;">Jarak Tempuh</b> <span id="jarak-text">0.00 m</span></div>
+        <div class="info-box"><b style="font-size: 12px;">Waktu Aktif</b> <span id="waktu-text">0 s</span></div>
     </div>
 
     <script>
@@ -66,7 +79,7 @@ leaflet_component = """
             map = L.map('map').setView([lat, lon], 17);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 maxZoom: 19,
-                attribution: '© OpenStreetMap'
+                attribution: '© OpenStreetMap | <b>Hak Cipta © Mikha Febrian</b>'
             }).addTo(map);
             polyline = L.polyline([], {color: '#2563eb', weight: 5}).addTo(map);
         }
@@ -90,7 +103,7 @@ leaflet_component = """
             latLngs = []; totalJarak = 0; activeSeconds = 0;
             document.getElementById("btn-start").disabled = true;
             document.getElementById("btn-stop").disabled = false;
-            document.getElementById("status-text").innerText = "Melacak GPS...";
+            document.getElementById("status-text").innerText = "Melacak GPS";
             document.getElementById("status-text").style.color = "#16a34a";
 
             startTime = Date.now();
@@ -185,8 +198,8 @@ st.markdown("---")
 # BAGIAN 2: PETA PELACAKAN RUTE
 # ==========================================
 st.markdown("### 2. Peta Pelacakan Rute Real-Time")
-# Render Komponen Peta Live GPS
-result_data = components.html(leaflet_component, height=550)
+# Komponen diperlebar secara vertikal agar muat responsif di layar HP
+result_data = components.html(leaflet_component, height=600)
 
 st.markdown("---")
 
@@ -194,7 +207,7 @@ st.markdown("---")
 # BAGIAN 3: KALKULASI & SIMPAN HASIL AUDIT
 # ==========================================
 st.markdown("### 3. Kalkulasi & Simpan Hasil Audit")
-st.info("Salin angka Jarak dan Waktu dari layar peta di atas, lalu pastikan parameter BBM sudah sesuai untuk menghitung total efisiensi biaya.")
+st.info("Salin angka Jarak dan Waktu dari layar peta di atas, pastikan parameter BBM sesuai, lalu klik tombol simpan.")
 
 with st.form("form_simpan"):
     f_col1, f_col2 = st.columns(2)
@@ -227,7 +240,7 @@ if btn_simpan:
         m2.metric(label="Total Biaya Operasional", value=f"Rp {total_biaya:,.0f}")
         m3.metric(label="Efisiensi Rupiah / Meter", value=f"Rp {efisiensi_per_m:,.2f}")
         
-        # Simpan ke DataFrame/CSV
+        # Simpan ke DataFrame/CSV dengan kolom Watermark untuk cegah pencurian data
         data_baru = pd.DataFrame([{
             "Tanggal": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "Seri Forklift": seri,
@@ -238,7 +251,8 @@ if btn_simpan:
             "Hambatan": hambatan if hambatan else "Tidak Ada",
             "Allowance (Menit)": allowance_waktu,
             "Liter/Km": konsumsi_bbm,
-            "Total Biaya (Rp)": total_biaya
+            "Total Biaya (Rp)": total_biaya,
+            "Otorisasi Sistem": "© Mikha Febrian" # Watermark Data
         }])
         
         if os.path.exists(CSV_FILENAME):
@@ -271,3 +285,15 @@ if os.path.exists(CSV_FILENAME):
     )
 else:
     st.info("Belum ada data perjalanan yang tersimpan di server.")
+
+# ==========================================
+# WATERMARK SISTEM (HAK CIPTA)
+# ==========================================
+st.markdown("""
+    <br><br>
+    <div style="text-align: center; font-size: 12px; color: #888; border-top: 1px solid #eaeaea; padding-top: 15px;">
+        <b>Sistem Audit Forklift PT S.R.I.</b><br>
+        Hak Cipta © 2026 Dirancang dan Dikembangkan oleh <b>Mikha Febrian</b>.<br>
+        <i>Sistem dan file basis data ini dilindungi. Tidak untuk diakui, diduplikasi, atau didistribusikan tanpa izin.</i>
+    </div>
+""", unsafe_allow_html=True)
