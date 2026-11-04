@@ -158,3 +158,261 @@ leaflet_component = """
         function setStreamlitInput(labelFragment, value) {
             let parentDoc = window.parent.document;
             let inputs = parentDoc.querySelectorAll('input');
+            for (let i = 0; i < inputs.length; i++) {
+                let ariaLabel = inputs[i].getAttribute('aria-label');
+                if (ariaLabel && ariaLabel.includes(labelFragment)) {
+                    let nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                    nativeSetter.call(inputs[i], value);
+                    inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
+                    break;
+                }
+            }
+        }
+
+        function selesaiTracking() {
+            if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+            clearInterval(timerInterval);
+
+            document.getElementById("btn-start").disabled = false;
+            document.getElementById("btn-stop").disabled = true;
+            document.getElementById("status-text").innerText = "Menyimpan Data...";
+            document.getElementById("status-text").style.color = "#eab308";
+
+            // Fitur Foto Rute Otomatis
+            setTimeout(() => {
+                html2canvas(document.querySelector("#map-container"), {useCORS: true}).then(canvas => {
+                    let imgData = canvas.toDataURL("image/png");
+                    
+                    // Kirim data jarak, waktu, dan Foto Map ke form Python secara Otomatis
+                    setStreamlitInput("Jarak Tempuh Tercatat", totalJarak.toFixed(2));
+                    setStreamlitInput("Waktu Tempuh Tercatat", activeSeconds.toString());
+                    setStreamlitInput("Base64 Peta Rahasia", imgData);
+                    
+                    document.getElementById("status-text").innerText = "Selesai";
+                    document.getElementById("status-text").style.color = "#2563eb";
+                }).catch(err => {
+                    setStreamlitInput("Jarak Tempuh Tercatat", totalJarak.toFixed(2));
+                    setStreamlitInput("Waktu Tempuh Tercatat", activeSeconds.toString());
+                    document.getElementById("status-text").innerText = "Selesai (Map Gagal)";
+                });
+            }, 1000); // Jeda sejenak agar peta ter-render utuh
+        }
+
+        window.onload = function() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => initMap(pos.coords.latitude, pos.coords.longitude),
+                    () => initMap(-6.480, 106.840)
+                );
+            } else {
+                initMap(-6.480, 106.840);
+            }
+        };
+    </script>
+</body>
+</html>
+"""
+
+# ==========================================
+# BAGIAN 1: DATA OPERASIONAL & KENDARAAN
+# ==========================================
+st.markdown("### 1. Data Operasional & Kendaraan")
+with st.container():
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**Spesifikasi Kendaraan**")
+        seri = st.selectbox("Seri Forklift", [f"Seri {i}" for i in range(1158, 1165)])
+        beban = st.selectbox("Status Beban", ["Kosong (Tanpa Palet)", "Isi (Bawa Barang)"])
+        area = st.selectbox("Area Operasional", ["Indoor", "Outdoor"])
+        
+    with col2:
+        st.markdown("**Kendala Lapangan**")
+        hambatan = st.text_area("Hambatan di Rute (Opsional)", placeholder="Misal: Jalan berlubang, area loading ramai...")
+        allowance_waktu = st.number_input("Allowance Waktu (Menit)", min_value=0, value=0, help="Tambahan waktu kelonggaran akibat hambatan")
+
+st.markdown("---")
+
+# ==========================================
+# BAGIAN 2: PETA PELACAKAN RUTE
+# ==========================================
+st.markdown("### 2. Peta Pelacakan Rute Real-Time")
+result_data = components.html(leaflet_component, height=600)
+
+st.markdown("---")
+
+# ==========================================
+# BAGIAN 3: KALKULASI & SIMPAN HASIL AUDIT
+# ==========================================
+st.markdown("### 3. Kalkulasi & Simpan Hasil Audit")
+st.info("💡 Angka GPS dan Foto Peta kini akan terisi **OTOMATIS** saat Anda menekan tombol 'SAMPAI TUJUAN' di layar Peta atas.")
+
+with st.form("form_simpan"):
+    f_col1, f_col2 = st.columns(2)
+    
+    with f_col1:
+        st.markdown("**Data dari GPS (Terisi Otomatis)**")
+        # Mengubah menjadi text_input agar JS mudah melakukan injeksi dari DOM Document
+        input_jarak_str = st.text_input("Jarak Tempuh Tercatat (Meter)", value="0.0")
+        input_waktu_str = st.text_input("Waktu Tempuh Tercatat (Detik)", value="0")
+        
+        # Hidden input untuk base64 image
+        input_img_b64 = st.text_input("Base64 Peta Rahasia", value="", label_visibility="collapsed")
+        
+    with f_col2:
+        st.markdown("**Parameter Biaya**")
+        konsumsi_bbm = st.number_input("Penggunaan Bensin (Liter/Km)", min_value=0.0, value=1.5, step=0.1)
+        harga_bbm = st.number_input("Harga BBM per Liter (Rp)", min_value=0, value=10000, step=500)
+        
+    st.markdown("<br>", unsafe_allow_html=True)
+    btn_simpan = st.form_submit_button("Kalkulasi & Simpan Data", use_container_width=True)
+
+# Trik CSS untuk menyembunyikan kotak input Base64 Peta
+st.markdown("""<style>div[data-testid="stTextInput"]:has(input[aria-label="Base64 Peta Rahasia"]) { display: none; }</style>""", unsafe_allow_html=True)
+
+if btn_simpan:
+    try:
+        input_jarak = float(input_jarak_str)
+        input_waktu = int(input_waktu_str)
+    except:
+        input_jarak = 0.0
+        input_waktu = 0
+
+    if input_jarak > 0:
+        jarak_km = input_jarak / 1000
+        total_liter = jarak_km * konsumsi_bbm
+        total_biaya = total_liter * harga_bbm
+        efisiensi_per_m = total_biaya / input_jarak if input_jarak > 0 else 0
+        
+        st.success("Data & Foto Rute berhasil dihitung dan disimpan!")
+        m1, m2, m3 = st.columns(3)
+        m1.metric(label="Total Bensin Digunakan", value=f"{total_liter:.2f} Liter")
+        m2.metric(label="Total Biaya Operasional", value=f"Rp {total_biaya:,.0f}")
+        m3.metric(label="Efisiensi Rupiah / Meter", value=f"Rp {efisiensi_per_m:,.2f}")
+        
+        # Simpan Foto Peta secara lokal
+        map_filepath = "Tidak Ada"
+        if input_img_b64.startswith("data:image"):
+            try:
+                img_data = base64.b64decode(input_img_b64.split(",")[1])
+                filename = f"Map_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                map_filepath = os.path.join(IMAGE_DIR, filename)
+                with open(map_filepath, "wb") as f:
+                    f.write(img_data)
+            except:
+                pass
+        
+        data_baru = pd.DataFrame([{
+            "Tanggal": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "Seri Forklift": seri,
+            "Beban": beban,
+            "Area": area,
+            "Jarak (Meter)": input_jarak,
+            "Waktu (Detik)": input_waktu,
+            "Hambatan": hambatan if hambatan else "Tidak Ada",
+            "Allowance (Menit)": allowance_waktu,
+            "Liter/Km": konsumsi_bbm,
+            "Total Biaya (Rp)": total_biaya,
+            "Otorisasi Sistem": "© Mikha Febrian",
+            "File Peta": map_filepath # Path foto disimpan di database
+        }])
+        
+        if os.path.exists(CSV_FILENAME):
+            df_existing = pd.read_csv(CSV_FILENAME)
+            df_updated = pd.concat([df_existing, data_baru], ignore_index=True)
+        else:
+            df_updated = data_baru
+            
+        df_updated.to_csv(CSV_FILENAME, index=False)
+    else:
+        st.error("Jarak tempuh masih 0. Pastikan GPS sudah mendeteksi perjalanan sebelum klik Simpan.")
+
+st.markdown("---")
+
+# ==========================================
+# BAGIAN 4: LOG LAPORAN & MANAJEMEN DATA
+# ==========================================
+st.markdown("### 4. Log Laporan Audit PT S.R.I.")
+if os.path.exists(CSV_FILENAME):
+    df_tampil = pd.read_csv(CSV_FILENAME)
+    st.dataframe(df_tampil, use_container_width=True)
+    
+    # Fungsi Generate File Excel (.xlsx) dengan Foto Peta tertempel otomatis
+    def generate_excel_with_images(df):
+        output = BytesIO()
+        # Menggunakan xlsxwriter untuk menanam foto
+        workbook = xlsxwriter.Workbook(output, {'in_memory': True})
+        worksheet = workbook.add_worksheet("Laporan Audit")
+        
+        # Style
+        bold_format = workbook.add_format({'bold': True, 'bg_color': '#f3f4f6', 'border': 1})
+        border_format = workbook.add_format({'border': 1, 'valign': 'vcenter'})
+        
+        # Tulis Header
+        headers = df.columns
+        for col_num, data in enumerate(headers):
+            worksheet.write(0, col_num, data, bold_format)
+            worksheet.set_column(col_num, col_num, 15)
+        
+        # Tulis Data & Tempel Gambar
+        for row_num, row_data in df.iterrows():
+            for col_num, cell_data in enumerate(row_data):
+                if headers[col_num] == "File Peta" and str(cell_data).endswith('.png'):
+                    worksheet.write(row_num + 1, col_num, "Terlampir", border_format)
+                    if os.path.exists(cell_data):
+                        # Tempelkan foto otomatis ke dalam excel dengan skala pas
+                        worksheet.insert_image(row_num + 1, col_num, cell_data, {'x_scale': 0.15, 'y_scale': 0.15, 'x_offset': 5, 'y_offset': 5})
+                        worksheet.set_row(row_num + 1, 60) # Perlebar baris excel untuk gambar
+                else:
+                    worksheet.write(row_num + 1, col_num, cell_data, border_format)
+                    
+        workbook.close()
+        return output.getvalue()
+
+    col_dl, col_blank = st.columns([1, 2])
+    with col_dl:
+        excel_data = generate_excel_with_images(df_tampil)
+        st.download_button(
+            label="Unduh File Laporan EXCEL (Dengan Foto Rute)",
+            data=excel_data,
+            file_name="Laporan_Audit_Forklift_PT_SRI.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+    
+    # Fitur Hapus Data (Jika ada kesalahan input)
+    st.markdown("<br>", unsafe_allow_html=True)
+    with st.expander("Manajemen Data (Hapus Kesalahan Input)"):
+        if not df_tampil.empty:
+            opsi_hapus = df_tampil.index.astype(str) + " | " + df_tampil["Tanggal"] + " - " + df_tampil["Seri Forklift"] + " - Rp " + df_tampil["Total Biaya (Rp)"].astype(str)
+            baris_dihapus = st.selectbox(
+                "Pilih data yang salah input untuk dihapus:", 
+                df_tampil.index, 
+                format_func=lambda x: opsi_hapus[x]
+            )
+            
+            if st.button("Hapus Data Terpilih", type="primary"):
+                path_foto = df_tampil.loc[baris_dihapus, "File Peta"]
+                if str(path_foto).endswith('.png') and os.path.exists(path_foto):
+                    os.remove(path_foto) # Hapus juga file fotonya agar tidak menumpuk
+                
+                df_tampil = df_tampil.drop(index=baris_dihapus)
+                df_tampil.to_csv(CSV_FILENAME, index=False)
+                st.success("Data beserta foto rutenya berhasil dihapus dari sistem!")
+                st.rerun() 
+        else:
+            st.info("Data masih kosong.")
+else:
+    st.info("Belum ada data perjalanan yang tersimpan di server.")
+
+# ==========================================
+# WATERMARK SISTEM (HAK CIPTA)
+# ==========================================
+st.markdown("""
+    <br><br>
+    <div style="text-align: center; font-size: 12px; color: #888; border-top: 1px solid #eaeaea; padding-top: 15px;">
+        <b>Sistem Audit Forklift PT S.R.I.</b><br>
+        Hak Cipta © 2026 Dirancang dan Dikembangkan oleh <b>Mikha Febrian</b>.<br>
+        <i>Sistem dan file basis data ini dilindungi. Tidak untuk diakui, diduplikasi, atau didistribusikan tanpa izin.</i>
+    </div>
+""", unsafe_allow_html=True)
